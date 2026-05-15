@@ -6,12 +6,12 @@ Fastify plugin for resumable video uploads via the [TUS protocol](https://tus.io
     Pulse app                   Your Fastify app
     ─────────                   ────────────────
 
-   ┌───────────┐    pair +    ┌──────────────────────┐
-   │ iOS / web │ ─── TUS ───► │  Pulsevault plugin   │
-   └───────────┘              │  POST  /upload       │
-                              │  PATCH /upload/:id   │
-                              │  GET   /:videoid     │
-                              └──────────┬───────────┘
+   ┌───────────┐    pair +    ┌────────────────────────────────┐
+   │ iOS / web │ ─── TUS ───► │  Pulsevault plugin             │
+   └───────────┘              │  POST  /pulsevault/upload      │
+                              │  PATCH /pulsevault/upload/:id  │
+                              │  GET   /pulsevault/:videoid    │
+                              └────────────────┬───────────────┘
                                          │
                                          ▼
                               ┌──────────────────────┐
@@ -57,7 +57,7 @@ import pulseVault, { createLocalStorage } from "@mieweb/pulsevault";
 const app = Fastify();
 
 await app.register(pulseVault, {
-  prefix: "",
+  prefix: "/pulsevault",
   storage: createLocalStorage({ workspaceDir: "./data" }),
   maxUploadSize: 5 * 1024 * 1024 * 1024, // 5 GiB
 });
@@ -74,18 +74,18 @@ await app.listen({ port: 3030 });
 
 The plugin mounts the following routes under `prefix`:
 
-| Method                         | Path          | Description                                      |
-| ------------------------------ | ------------- | ------------------------------------------------ |
-| `POST`                         | `/upload`     | Create a TUS upload session                      |
-| `PATCH` / `HEAD` / `DELETE` \* | `/upload/:id` | Upload chunks, probe offset, cancel upload (TUS) |
-| `GET`                          | `/:videoid`   | Stream or redirect to the uploaded video         |
-| `DELETE`                       | `/:videoid`   | Delete a finalized upload (bytes + sidecar)      |
+| Method                         | Path                      | Description                                      |
+| ------------------------------ | ------------------------- | ------------------------------------------------ |
+| `POST`                         | `/pulsevault/upload`      | Create a TUS upload session                      |
+| `PATCH` / `HEAD` / `DELETE` \* | `/pulsevault/upload/:id`  | Upload chunks, probe offset, cancel upload (TUS) |
+| `GET`                          | `/pulsevault/:videoid`    | Stream or redirect to the uploaded video         |
+| `DELETE`                       | `/pulsevault/:videoid`    | Delete a finalized upload (bytes + sidecar)      |
 
-\* `DELETE /upload/:id` is TUS's own "cancel in-flight upload" — distinct from `DELETE /:videoid`, which removes a finalized video.
+\* `DELETE /pulsevault/upload/:id` is TUS's own "cancel in-flight upload" — distinct from `DELETE /pulsevault/:videoid`, which removes a finalized video.
 
 > `POST /reserve` is **not** part of the plugin. Your server implements it so you control auth, ownership, and any business logic tied to video creation.
 
-`GET /:videoid` only serves uploads whose adapter has been told to mark them ready. With the built-in local adapter, that means the final PATCH has landed _and_ `validatePayload` (if configured) accepted the bytes. In-progress uploads return 404.
+`GET /pulsevault/:videoid` only serves uploads whose adapter has been told to mark them ready. With the built-in local adapter, that means the final PATCH has landed _and_ `validatePayload` (if configured) accepted the bytes. In-progress uploads return 404.
 
 ## Plugin options
 
@@ -109,7 +109,7 @@ A `PulseVaultStorage` adapter. Use the built-in `createLocalStorage` for filesys
 
 ### `prefix`
 
-URL prefix for all plugin routes. Use `""` to mount at the root or `"/pulsevault"` to namespace. Must start with `/` (no trailing slash) or be `""`.
+URL prefix for all plugin routes. Set to `"/pulsevault"` for the standard namespaced mount. Use `""` to mount at the root. Must start with `/` (no trailing slash) or be `""`.
 
 > Because the plugin uses `fastify-plugin` to escape encapsulation, Fastify's native `register(..., { prefix })` is a no-op — always pass `prefix` through this option.
 
@@ -265,7 +265,7 @@ import pulseVault, { createLocalStorage } from "@mieweb/pulsevault";
 const storage = createLocalStorage({ workspaceDir: "./data" });
 
 await app.register(pulseVault, {
-  prefix: "",
+  prefix: "/pulsevault",
   storage,
   maxUploadSize: 5 * 1024 * 1024 * 1024,
   onUploadComplete: async (_req, { videoid }) => {

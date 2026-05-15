@@ -321,10 +321,10 @@ app.get(
   },
 );
 
-// Mount plugin at root prefix so TUS is at POST /upload and video GET is at /:videoid
+// Mount plugin under /pulsevault so TUS is at POST /pulsevault/upload and video GET is at /pulsevault/:videoid
 const pulseStorage = createLocalStorage({ workspaceDir: dataDir });
 await app.register(pulseVault, {
-  prefix: "",
+  prefix: "/pulsevault",
   storage: pulseStorage,
   maxUploadSize: 5 * 1024 * 1024 * 1024, // 5 GiB
   allowedExtensions: [".mp4"],
