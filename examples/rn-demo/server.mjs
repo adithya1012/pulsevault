@@ -11,31 +11,12 @@ import QRCode from "qrcode";
 import pulseVault, {
   createLocalStorage,
   createMp4Sniffer,
-  buildConfigureDestinationLink,
   buildUploadLink,
 } from "@mieweb/pulsevault";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(path.join(__dirname, "public/index.html"), "utf8");
 const dataDir = path.join(__dirname, "data");
-
-/**
- * In-memory token store: maps videoid → token for token-protected uploads.
- * Populated in the authorize hook during the 'create' phase when the app
- * sends a Bearer token that matches SESSION_TOKEN.
- * No persistence — tokens are lost when the server restarts.
- */
-const tokenStore = new Map();
-
-/**
- * A single server-level session token generated at startup.
- * Embed it in the configure-destination QR so the Pulse app stores it
- * alongside the server URL. Every upload made with that saved destination
- * will include the token as a Bearer header, registering the video as
- * token-protected.
- */
-const SESSION_TOKEN = randomUUID();
-console.log(`[auth] Session token: ${SESSION_TOKEN}`);
 
 const app = Fastify({
   logger: true,
@@ -76,7 +57,7 @@ app.get(
       tags: ["demo"],
       summary: "Pairing page (HTML)",
       description:
-        "Returns the static pairing UI that renders the configure-destination and upload QR codes.",
+        "Returns the static pairing UI that renders the upload QR code.",
       response: {
         200: {
           description: "HTML pairing page.",
@@ -125,7 +106,6 @@ const videoSummarySchema = {
     filename: { type: "string" },
     size: { type: "integer", minimum: 0 },
     creation_date: { type: "string", format: "date-time" },
-    token: { type: "string", description: "Present when this video requires a token to watch." },
   },
   required: ["videoid", "filename", "size", "creation_date"],
 };
@@ -189,7 +169,6 @@ app.get(
             size: mp4Stat.size,
             creation_date:
               meta?.creation_date ?? mp4Stat.birthtime.toISOString(),
-            ...(tokenStore.has(videoid) && { token: tokenStore.get(videoid) }),
           };
         }),
     );
@@ -202,41 +181,29 @@ app.get(
   },
 );
 
-// Return pre-built deep links for the pairing page.
-// draftId and videoid are generated here so the server is the single source of truth.
+// Return a pre-built upload deep link for the pairing page.
+// videoid is generated here so the server is the single source of truth.
 app.get(
   "/deeplinks",
   {
     schema: {
       tags: ["demo"],
-      summary: "Deep links + QR codes for RN pairing",
+      summary: "Upload deep link + QR code for RN pairing",
       description:
-        "Builds a configure-destination link and a videoid-scoped upload link, then encodes both as data-URL PNG QR codes.",
+        "Builds a videoid-scoped upload link and encodes it as a data-URL PNG QR code.",
       response: {
         200: {
-          description: "Deep links and their QR-code renderings.",
+          description: "Deep link and its QR-code rendering.",
           type: "object",
           properties: {
-            configureDestination: { type: "string", format: "uri" },
             upload: { type: "string", format: "uri" },
             videoid: { type: "string", format: "uuid" },
-            qrConfigure: {
-              type: "string",
-              description:
-                "data:image/png;base64 QR for `configureDestination`.",
-            },
             qrUpload: {
               type: "string",
               description: "data:image/png;base64 QR for `upload`.",
             },
           },
-          required: [
-            "configureDestination",
-            "upload",
-            "videoid",
-            "qrConfigure",
-            "qrUpload",
-          ],
+          required: ["upload", "videoid", "qrUpload"],
         },
       },
     },
@@ -247,10 +214,6 @@ app.get(
     const server = `${proto}://${host}`;
     const videoid = randomUUID();
 
-    const configureDestination = buildConfigureDestinationLink({
-      server,
-      name: "Demo Server",
-    });
     const upload = buildUploadLink({ server, videoid });
 
     const qrOpts = {
@@ -258,66 +221,13 @@ app.get(
       margin: 1,
       color: { dark: "#000000", light: "#ffffff" },
     };
-    const [qrConfigure, qrUpload] = await Promise.all([
-      QRCode.toDataURL(configureDestination, qrOpts),
-      QRCode.toDataURL(upload, qrOpts),
-    ]);
+    const qrUpload = await QRCode.toDataURL(upload, qrOpts);
 
     return reply.send({
-      configureDestination,
       upload,
       videoid,
-      qrConfigure,
       qrUpload,
     });
-  },
-);
-
-// Token-protected server-configuration QR: uses buildConfigureDestinationLink
-// (same as Section 1) but embeds SESSION_TOKEN so the Pulse app stores the
-// token alongside the server URL. Uploads made with this saved destination
-// send "Authorization: Bearer <token>", which the authorize hook uses to
-// register the videoid as token-protected before the bytes are written.
-app.get(
-  "/deeplinks-token",
-  {
-    schema: {
-      tags: ["demo"],
-      summary: "Token-protected server-config QR",
-      description:
-        "Returns a configure-destination deep link that embeds the server-level session token. " +
-        "Scanning this QR saves the server + token in the app. Any subsequent upload from that " +
-        "saved destination will be token-protected: the server registers the videoid in its token " +
-        "store and rejects watch requests that omit the correct token.",
-      response: {
-        200: {
-          description: "Token-scoped configure-destination link and QR code.",
-          type: "object",
-          properties: {
-            configureDestination: { type: "string", format: "uri" },
-            token: { type: "string", description: "The session token embedded in the QR." },
-            qrConfigure: { type: "string", description: "data:image/png;base64 QR for the token-scoped configure-destination link." },
-          },
-          required: ["configureDestination", "token", "qrConfigure"],
-        },
-      },
-    },
-  },
-  async (req, reply) => {
-    const proto = req.headers["x-forwarded-proto"] ?? "http";
-    const host = req.headers["x-forwarded-host"] ?? req.headers.host;
-    const server = `${proto}://${host}`;
-
-    const configureDestination = buildConfigureDestinationLink({
-      server,
-      name: "Demo Server (Token Auth)",
-      token: SESSION_TOKEN,
-    });
-
-    const qrOpts = { width: 224, margin: 1, color: { dark: "#000000", light: "#ffffff" } };
-    const qrConfigure = await QRCode.toDataURL(configureDestination, qrOpts);
-
-    return reply.send({ configureDestination, token: SESSION_TOKEN, qrConfigure });
   },
 );
 
@@ -332,45 +242,13 @@ await app.register(pulseVault, {
   validatePayload: createMp4Sniffer(pulseStorage),
   /**
    * Authorization hook — called before every create/patch/resolve/delete.
+   * This demo server has no real auth store and accepts all requests.
    *
-   * For the "resolve" phase the mobile app forwards any upload token as
-   * `?token=<value>` in the watch URL; the plugin surfaces it here as
-   * `ctx.token` so the parent server can validate it without a separate
-   * browser login.
-   *
-   * This demo server has no real auth store, so it accepts all requests.
-   * A production deployment would look up the token in a DB/session store
-   * and throw to reject (e.g. `throw { statusCode: 403, message: "Forbidden" }`).
+   * TODO: plug real auth here — sessions, JWT, mTLS, etc. Throw to reject,
+   * e.g. `throw { statusCode: 403, message: "Forbidden" }`.
    */
-  authorize: async (request, ctx) => {
-    if (ctx.phase === "create") {
-      // When the app uploads using the token-protected saved destination it
-      // sends "Authorization: Bearer <SESSION_TOKEN>". Register this videoid
-      // in the token store so the resolve phase can protect it.
-      const authHeader = request.headers["authorization"];
-      const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
-        ? authHeader.slice(7)
-        : undefined;
-      if (bearer !== undefined && bearer === SESSION_TOKEN) {
-        tokenStore.set(ctx.videoid, SESSION_TOKEN);
-        app.log.info(
-          { videoid: ctx.videoid },
-          "pulsevault authorize: token-protected videoid registered",
-        );
-      }
-    } else if (ctx.phase === "resolve") {
-      const expectedToken = tokenStore.get(ctx.videoid);
-      if (expectedToken !== undefined) {
-        // This videoid requires a token to watch.
-        if (ctx.token !== expectedToken) {
-          throw { statusCode: 403, message: "Invalid or missing watch token" };
-        }
-        app.log.info(
-          { videoid: ctx.videoid },
-          "pulsevault authorize: token-protected watch request verified",
-        );
-      }
-    }
+  authorize: async (_request, _ctx) => {
+    // no-op
   },
 });
 
