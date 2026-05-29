@@ -74,10 +74,13 @@ export function tusError(status: number, body: string): Error {
   });
 }
 
-/** Parse the first path segment of a tus upload id as the videoid. */
+/** Parse the videoid UUID from a tus upload id of the form `<kind>/<videoid><ext>`. */
 function videoidFromUploadId(id: string): string | undefined {
-  const first = id.split("/", 1)[0];
-  return isUuid(first) ? first : undefined;
+  const [, nameWithExt] = id.split("/");
+  if (!nameWithExt) return undefined;
+  const ext = path.extname(nameWithExt);
+  const candidate = ext ? nameWithExt.slice(0, -ext.length) : nameWithExt;
+  return isUuid(candidate) ? candidate : undefined;
 }
 
 /**

@@ -129,7 +129,7 @@ test("reserve + full upload flips sidecar to ready and GET streams the bytes", a
 
     const sidecar = JSON.parse(
       await fs.readFile(
-        path.join(ctx.workspaceDir, ID1, ".pulsevault.json"),
+        path.join(ctx.workspaceDir, ".pulsevault", `${ID1}.json`),
         "utf8",
       ),
     );
@@ -302,10 +302,10 @@ test("DELETE removes the video; second DELETE is 404", async () => {
     const del = await fetch(`${ctx.baseUrl}${PREFIX}/${ID1}`, { method: "DELETE" });
     assert.equal(del.status, 204);
 
-    const dirStat = await fs
-      .stat(path.join(ctx.workspaceDir, ID1))
+    const sidecarStat = await fs
+      .stat(path.join(ctx.workspaceDir, ".pulsevault", `${ID1}.json`))
       .catch(() => null);
-    assert.equal(dirStat, null);
+    assert.equal(sidecarStat, null);
 
     const postGet = await fetch(`${ctx.baseUrl}${PREFIX}/${ID1}`);
     assert.equal(postGet.status, 404);
@@ -339,10 +339,10 @@ test("createMp4Sniffer rejects non-MP4 bytes and removes the video", async () =>
       `expected 4xx, got ${patch.status}`,
     );
 
-    const dirStat = await fs
-      .stat(path.join(ctx.workspaceDir, ID1))
+    const sidecarStat = await fs
+      .stat(path.join(ctx.workspaceDir, ".pulsevault", `${ID1}.json`))
       .catch(() => null);
-    assert.equal(dirStat, null, "videoid dir should be removed");
+    assert.equal(sidecarStat, null, "sidecar should be removed");
 
     const get = await fetch(`${ctx.baseUrl}${PREFIX}/${ID1}`);
     assert.equal(get.status, 404);
@@ -387,9 +387,8 @@ test("onUploadComplete fires exactly once with the right ctx", async () => {
 test("malformed sidecar is treated as absent; reserve rewrites it", async () => {
   const ctx = await startApp();
   try {
-    const dir = path.join(ctx.workspaceDir, ID1);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, ".pulsevault.json"), "not json");
+    await fs.mkdir(path.join(ctx.workspaceDir, ".pulsevault"), { recursive: true });
+    await fs.writeFile(path.join(ctx.workspaceDir, ".pulsevault", `${ID1}.json`), "not json");
 
     const get = await fetch(`${ctx.baseUrl}${PREFIX}/${ID1}`);
     assert.equal(get.status, 404);

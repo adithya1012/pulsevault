@@ -150,9 +150,10 @@ app.get(
     },
   },
   async (_req, reply) => {
+    const pulsevaultMetaDir = path.join(dataDir, ".pulsevault");
     let entries;
     try {
-      entries = await readdir(dataDir, { withFileTypes: true });
+      entries = await readdir(pulsevaultMetaDir, { withFileTypes: true });
     } catch (err) {
       if (err.code === "ENOENT") return reply.send([]);
       throw err;
@@ -160,24 +161,23 @@ app.get(
 
     const uploads = await Promise.all(
       entries
-        .filter((e) => e.isDirectory())
+        .filter((e) => e.isFile() && e.name.endsWith(".json") && !e.name.endsWith(".tmp"))
         .map(async (e) => {
-          const videoid = e.name;
-          const sidecarPath = path.join(dataDir, videoid, ".pulsevault.json");
+          const videoid = e.name.slice(0, -".json".length);
+          const sidecarFilePath = path.join(pulsevaultMetaDir, e.name);
           let sidecar;
           try {
-            sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+            sidecar = JSON.parse(await readFile(sidecarFilePath, "utf8"));
           } catch {
-            return null; // not a managed upload directory
+            return null;
           }
           // Only list ready uploads; skip in-progress ones.
           if (sidecar.status !== "ready") return null;
 
           const kind = sidecar.kind ?? "video";
           const ext = sidecar.ext ?? ".mp4";
-          const artifactDir = path.join(dataDir, videoid, kind);
           const artifactFile = `${videoid}${ext}`;
-          const artifactPath = path.join(artifactDir, artifactFile);
+          const artifactPath = path.join(dataDir, kind, artifactFile);
           const tusJsonPath = `${artifactPath}.json`;
 
           const [artifactStat, tusMeta] = await Promise.all([

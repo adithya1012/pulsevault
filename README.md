@@ -293,11 +293,11 @@ const storage = createLocalStorage({
 
 ### Filesystem layout (stable contract)
 
-The local adapter writes each upload into a self-describing per-resource directory. Downstream tools may rely on this layout across minor versions:
+The local adapter writes uploads into flat kind-scoped subdirectories. Downstream tools may rely on this layout across minor versions:
 
 ```text
-<workspaceRoot>/<id>/
-  .pulsevault.json                # sidecar: { version, ext, filename, status, kind }
+<workspaceRoot>/
+  .pulsevault/<id>.json           # sidecar: { version, ext, filename, status, kind }
   video/<id><ext>                 # video upload bytes  (kind="video")
   video/<id><ext>.json            # @tus/file-store offset/metadata sidecar
   project/<id><ext>               # project bundle bytes (kind="project")
@@ -324,9 +324,9 @@ await app.register(pulseVault, {
   storage,
   maxUploadSize: 5 * 1024 * 1024 * 1024,
   onUploadComplete: async (_req, { videoid }) => {
-    const root = path.join(storage.workspaceRoot, videoid);
+    const videoDir = path.join(storage.workspaceRoot, "video");
     const pod = new ArtiPod({ id: videoid, useMainMount: false });
-    pod.addMount(new ArtiMount("video", path.join(root, "video")));
+    pod.addMount(new ArtiMount("video", videoDir));
     // Create these lazily as your pipeline produces artifacts:
     // pod.addMount(new ArtiMount("transcripts", path.join(root, "transcripts")));
     // pod.addMount(new ArtiMount("frames", path.join(root, "frames")));

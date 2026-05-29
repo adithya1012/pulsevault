@@ -106,13 +106,13 @@ test("kind=project .pulse happy path: file under project/ subdir, correct Conten
     });
 
     // File must land at <uuid>/project/<uuid>.pulse
-    const expectedPath = path.join(ctx.workspaceDir, ID1, "project", `${ID1}.pulse`);
+    const expectedPath = path.join(ctx.workspaceDir, "project", `${ID1}.pulse`);
     const stat = await fs.stat(expectedPath);
     assert.ok(stat.isFile(), "file exists at project/ subdir");
 
     // Sidecar must record kind
     const sidecar = JSON.parse(
-      await fs.readFile(path.join(ctx.workspaceDir, ID1, ".pulsevault.json"), "utf8"),
+      await fs.readFile(path.join(ctx.workspaceDir, ".pulsevault", `${ID1}.json`), "utf8"),
     );
     assert.equal(sidecar.kind, "project");
     assert.equal(sidecar.ext, ".pulse");
@@ -141,7 +141,7 @@ test("kind=project .zip happy path: file under project/ subdir, Content-Type: ap
       payload,
     });
 
-    const expectedPath = path.join(ctx.workspaceDir, ID1, "project", `${ID1}.zip`);
+    const expectedPath = path.join(ctx.workspaceDir, "project", `${ID1}.zip`);
     const stat = await fs.stat(expectedPath);
     assert.ok(stat.isFile(), "zip exists at project/ subdir");
 
@@ -362,8 +362,8 @@ test("legacy sidecar without kind field resolves as video and streams correctly"
   const ctx = await startApp();
   try {
     // Manually write a pre-kind sidecar (as if written by the old plugin version)
-    const dir = path.join(ctx.workspaceDir, ID1);
-    await fs.mkdir(path.join(dir, "video"), { recursive: true });
+    await fs.mkdir(path.join(ctx.workspaceDir, "video"), { recursive: true });
+    await fs.mkdir(path.join(ctx.workspaceDir, ".pulsevault"), { recursive: true });
 
     // Write a minimal valid MP4 as the upload bytes
     const mp4Header = Buffer.from([
@@ -372,7 +372,7 @@ test("legacy sidecar without kind field resolves as video and streams correctly"
     ]);
     const mp4 = Buffer.alloc(1024);
     mp4Header.copy(mp4, 0);
-    await fs.writeFile(path.join(dir, "video", `${ID1}.mp4`), mp4);
+    await fs.writeFile(path.join(ctx.workspaceDir, "video", `${ID1}.mp4`), mp4);
 
     // Old sidecar format: no `kind` field
     const legacySidecar = JSON.stringify({
@@ -382,7 +382,7 @@ test("legacy sidecar without kind field resolves as video and streams correctly"
       status: "ready",
       // `kind` intentionally absent
     });
-    await fs.writeFile(path.join(dir, ".pulsevault.json"), legacySidecar);
+    await fs.writeFile(path.join(ctx.workspaceDir, ".pulsevault", `${ID1}.json`), legacySidecar);
 
     // GET must succeed as a video
     const get = await fetch(`${ctx.baseUrl}${PREFIX}/${ID1}`);
@@ -415,8 +415,8 @@ test("DELETE works for kind=project", async () => {
     const del = await fetch(`${ctx.baseUrl}${PREFIX}/${ID1}`, { method: "DELETE" });
     assert.equal(del.status, 204);
 
-    const dirStat = await fs.stat(path.join(ctx.workspaceDir, ID1)).catch(() => null);
-    assert.equal(dirStat, null, "directory removed");
+    const sidecarStat = await fs.stat(path.join(ctx.workspaceDir, ".pulsevault", `${ID1}.json`)).catch(() => null);
+    assert.equal(sidecarStat, null, "sidecar removed");
 
     const postGet = await fetch(`${ctx.baseUrl}${PREFIX}/${ID1}`);
     assert.equal(postGet.status, 404);
