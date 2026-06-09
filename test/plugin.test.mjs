@@ -25,23 +25,74 @@ function b64(str) {
   return Buffer.from(str, "utf8").toString("base64");
 }
 
-// Minimal ISOBMFF header: "ftyp" box with brand "isom". Enough bytes for
-// `sniffMp4` to accept and for realistic-looking upload sizes.
-const MP4_HEADER = Buffer.from([
-  0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70, // box size + "ftyp"
-  0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00, // brand "isom" + version
-]);
+function atom(type, payload = Buffer.alloc(0)) {
+  const size = 8 + payload.length;
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(size, 0);
+  header.write(type, 4, 4, "ascii");
+  return Buffer.concat([header, payload]);
+}
+
+function fullBox(type, version, flags, payload = Buffer.alloc(0)) {
+  const prefix = Buffer.alloc(4);
+  prefix[0] = version;
+  prefix[1] = (flags >> 16) & 0xff;
+  prefix[2] = (flags >> 8) & 0xff;
+  prefix[3] = flags & 0xff;
+  return atom(type, Buffer.concat([prefix, payload]));
+}
+
+function ftyp() {
+  const payload = Buffer.alloc(16);
+  payload.write("isom", 0, 4, "ascii");
+  payload.writeUInt32BE(0x00000200, 4);
+  payload.write("isom", 8, 4, "ascii");
+  payload.write("mp42", 12, 4, "ascii");
+  return atom("ftyp", payload);
+}
+
+function mvhd() {
+  const payload = Buffer.alloc(20);
+  payload.writeUInt32BE(0, 0);
+  payload.writeUInt32BE(0, 4);
+  payload.writeUInt32BE(1000, 8);
+  payload.writeUInt32BE(1000, 12);
+  return fullBox("mvhd", 0, 0, payload);
+}
+
+function mdhd() {
+  const payload = Buffer.alloc(20);
+  payload.writeUInt32BE(0, 0);
+  payload.writeUInt32BE(0, 4);
+  payload.writeUInt32BE(1000, 8);
+  payload.writeUInt32BE(1000, 12);
+  return fullBox("mdhd", 0, 0, payload);
+}
+
+function hdlr() {
+  const payload = Buffer.alloc(24);
+  payload.writeUInt32BE(0, 0);
+  payload.write("vide", 4, 4, "ascii");
+  return fullBox("hdlr", 0, 0, payload);
+}
+
+function moov() {
+  const mdia = atom("mdia", Buffer.concat([mdhd(), hdlr()]));
+  const trak = atom("trak", mdia);
+  return atom("moov", Buffer.concat([mvhd(), trak]));
+}
 
 function makeMp4(size) {
-  if (size < MP4_HEADER.length) {
-    throw new Error(`makeMp4: size ${size} < header ${MP4_HEADER.length}`);
+  const base = Buffer.concat([ftyp(), moov()]);
+  if (size < base.length + 8) {
+    throw new Error(`makeMp4: size ${size} < minimum ${base.length + 8}`);
   }
-  const body = Buffer.alloc(size);
-  MP4_HEADER.copy(body, 0);
-  for (let i = MP4_HEADER.length; i < body.length; i++) {
-    body[i] = i & 0xff;
+  const mdatPayloadSize = size - base.length - 8;
+  const mdatPayload = Buffer.alloc(mdatPayloadSize);
+  for (let i = 0; i < mdatPayload.length; i++) {
+    mdatPayload[i] = i & 0xff;
   }
-  return body;
+  return Buffer.concat([base, atom("mdat", mdatPayload)]);
 }
 
 async function startApp({ pluginOptions = {}, withSniffer = false } = {}) {

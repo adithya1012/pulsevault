@@ -205,7 +205,25 @@ await app.register(pulseVault, {
 });
 ```
 
-`createMp4Sniffer` reads the first 12 bytes and verifies the ISOBMFF `ftyp` header (MP4, MOV, M4V, 3GP). Uploads that pass the extension check but contain non-video bytes are rejected with 422 and the disk is cleaned up.
+`createMp4Sniffer` performs structural MP4 validation on the finalized upload bytes. It checks that:
+
+- `ftyp` exists near the start (ISO-BMFF container)
+- both `moov` and `mdat` atoms exist
+- `moov` appears before `mdat` (fast-start)
+- at least one video track exists (`hdlr` = `vide`)
+- duration metadata is readable (`mvhd`/`mdhd`)
+- the file is not obviously truncated
+
+Invalid uploads are rejected with `422 Unprocessable Entity`, cleaned from storage, and returned with the JSON body:
+
+```json
+{
+  "error": "invalid_video_upload",
+  "reason": "MP4 is not fast-start optimized. The moov atom must appear before mdat."
+}
+```
+
+The server does not transcode, rewrite, or repair uploaded files.
 
 The lower-level `sniffMp4(path)` is also exported if you want to drive your own validator.
 

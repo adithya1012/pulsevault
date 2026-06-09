@@ -58,14 +58,34 @@ export type PulsevaultTusOptions = {
  * right HTTP status.
  */
 export function tusError(status: number, body: string): Error {
+  return tusErrorWithType(status, body, "text/plain; charset=utf-8");
+}
+
+function tusErrorWithType(
+  status: number,
+  body: string,
+  contentType: string,
+): Error {
   return Object.assign(new Error(body), {
     statusCode: status,
     status_code: status,
     body,
+    headers: {
+      "content-type": contentType,
+    },
   });
 }
 
-/** Parse the first path segment of a tus upload id as the videoid. */
+function validationErrorBody(err: unknown): { error: string; reason: string } | null {
+  const candidate = (err as { pulseVaultError?: unknown })?.pulseVaultError;
+  if (!candidate || typeof candidate !== "object") return null;
+  const body = candidate as { error?: unknown; reason?: unknown };
+  if (typeof body.error !== "string") return null;
+  if (typeof body.reason !== "string") return null;
+  return { error: body.error, reason: body.reason };
+}
+
+/** Parse the videoid UUID from a tus upload id of the form `<kind>/<videoid><ext>`. */
 function videoidFromUploadId(id: string): string | undefined {
   const first = id.split("/", 1)[0];
   return isUuid(first) ? first : undefined;
@@ -159,6 +179,7 @@ export function createPulsevaultTusServer(options: PulsevaultTusOptions) {
           });
         } catch (err) {
           const status = statusCodeOf(err, 422);
+          const body = validationErrorBody(err);
           const message =
             err instanceof Error ? err.message : "Payload validation failed";
           try {
@@ -167,6 +188,13 @@ export function createPulsevaultTusServer(options: PulsevaultTusOptions) {
             store.request.log.error(
               { err: rmErr, videoid },
               "pulsevault failed to remove rejected upload",
+            );
+          }
+          if (body) {
+            throw tusErrorWithType(
+              status,
+              `${JSON.stringify(body)}\n`,
+              "application/json; charset=utf-8",
             );
           }
           throw tusError(status, `${message}\n`);
